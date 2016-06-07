@@ -1,0 +1,67 @@
+f :: (Functor f, Functor g) => (forall a. g (f a) -> f (g a)) -> Free g (Cofree f b) -> Cofree f (Free g b)
+
+in 2nd case:
+
+g :: forall a. g (f a) -> f (g a)
+x :: g (Free g (Cofree f b))
+
+res :: Cofree f (Free g b)
+res ~ Free g b :< f (Cofree f (Free g b))
+res = _1 :< _2 x
+
+_1 ~ g (Free g b)
+_1 = fmap (fmap extract) x
+
+_2 :: g (Free g (Cofree f b)) -> f (Cofree f (Free g b))
+
+_2 = foo . fmap (f g)
+
+foo :: g (Cofree f (Free g b)) -> f (Cofree f (Free g b))
+
+fmap (f g) y :: g (Cofree f (Free g b))
+              ~ g (Free g b, f (Cofree f (Free g b))
+
+fmap strength it :: g (f (Free g b, Cofree f (Free g b))
+
+g it :: f (g (Free g b, Cofree f (Free g b))
+
+fmap costrength it :: f (Free g b, g (Cofree f (Free g b)))
+
+fmap (second _2) it :: f (Free g b, 
+
+fmap (uncurry (:<)) it
+
+b :: Free g (Cofree f b) -> f (Cofree f b)
+b (Pure (_ :< y)) = y
+b (Free y) = 
+
+
+a :: g (Cofree f b) -> Cofree f (Free g b)
+
+example:  g = Const;  ie. data Const a = Const
+          f = Identity; ie. newtype Identity a = Identity a
+
+Const (Identity a) -> Identity (Const a) -- trivial
+
+Cofree Identity b ~ Stream b
+
+Free Const (Cofree Identity b)
+ ~ Pure (Stream b)
+ | Free
+
+ ~ Maybe (Stream b)
+
+Cofree Identity (Free Const b) ~ Stream (Maybe b)
+
+Maybe (Stream b) -> Stream (Maybe b)
+
+case of Nothing -> repeat Nothing
+        Pure s  -> fmap Pure s
+
+
+--------------------
+
+Free Identity a = ([()], a)
+Cofree (Const x) a = (x, a)
+
+NonEmpty (x, a) -> (x, NonEmpty a)

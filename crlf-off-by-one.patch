@@ -1,0 +1,78 @@
+From c81ecc72440cf4aed0091763130a39dde6109e18 Mon Sep 17 00:00:00 2001
+From: Niklas Haas <git@nand.wakku.to>
+Date: Fri, 21 Feb 2014 12:05:57 +0100
+Subject: [PATCH] Fix off-by-one error in writeBlocks when not using CRLF
+
+When the newline mode is set to CRLF, this still uses the old behavior,
+which commits the buffer one character prematurely to work around the
+edge case in which the last character to be output is \n.
+
+With this change, the \r padding is removed from the length check when the
+newline mode is LF. However, this introduces a slight side effect in
+that writeBlocks is technically a bit too strict, it will force the
+n+1th constructor before outputting the first n characters.
+---
+ GHC/IO/Handle/Text.hs | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/GHC/IO/Handle/Text.hs b/GHC/IO/Handle/Text.hs
+index f182e7f..fb02011 100644
+--- a/GHC/IO/Handle/Text.hs
++++ b/GHC/IO/Handle/Text.hs
+@@ -580,14 +580,17 @@ writeBlocks :: Handle -> Bool -> Bool -> Newline -> Buffer CharBufElem -> String
+ writeBlocks hdl line_buffered add_nl nl
+             buf@Buffer{ bufRaw=raw, bufSize=len } s =
+   let
++   nmax = case nl of
++     CRLF -> len - 1 -- extra space to account for \r\n in CRLF mode
++     LF   -> len
++
+    shoveString :: Int -> [Char] -> [Char] -> IO ()
+    shoveString !n [] [] = do
+         commitBuffer hdl raw len n False{-no flush-} True{-release-}
+    shoveString !n [] rest = do
+         shoveString n rest []
+    shoveString !n (c:cs) rest
+-     -- n+1 so we have enough room to write '\r\n' if necessary
+-     | n + 1 >= len = do
++     | n >= nmax = do
+         commitBuffer hdl raw len n False{-flush-} False
+         shoveString 0 (c:cs) rest
+      | c == '\n'  =  do
+-- 
+1.8.5.3
+
+-----BEGIN PGP MESSAGE-----
+Version: GnuPG v2.0.22 (GNU/Linux)
+
+owGVVVtsFFUY7gVoHAMxKld9+IkG2uzOdmYvbLu6tbS4LIFSpXhJ2lrPzpzZGXb2
+nDpzttvSlvCEIahBTQgIJGJMDERNSCsBESKJIsaEF594wRDFeMOAwZKoEP8zu0ir
+5cHNZmfOf/7L933n/8/unl9fU1f72Hvj628evfd87QcN83NPaJqmqxlnWOWWpeZG
+VM6oSj2Pe6rD1LLnCNrhcqPgq2WbMpVxoZZ8h+XVzsggEYbd05D4JePxIhgtOjWM
+ZDQe1wwrTqipaa16clVMj2kk1mqadJWutVK9Bbo4gx46CHoSNC0VfCGKIBSZJgUb
+nYJLfMgS/Hk874h2RpgZKZNCoRQRvE1ZQwRNQcZzwhDVIUNzGKzHQY+mtEQqkYSQ
+pmua0lPKbaGGSEHvU6s3d2b7ARnCHYYQMASHwTSGIBkCMoSAIXRu2pBRlOekUdgU
+GC27DoYWuUnB8cGnAgQPvMLoIC3CcV0Mpn4QwF0TctQmQw73wkrZdgwbDF4sOqKy
+nytZFvVAwjFs4hFD4GrQo0UiSh51R2T2MvcKQDxeYqaMUaiZR2/i0wB7kFKmQsXE
+tCQYmMP6JTFYEhJqH4sgEUfYFZzoyPI0HET2YUlimpIv7mBxPkRNsOSJBokpy2OY
+YVOjUNFHovi3FBsyEcjyMh2iXlUKhwmPmyUDpSDgu07eFuA76E2Rs4GgmCJsImbI
+j2GCGjZzDOIiewI5RyrMUVfPMUQYcFmWClvcM2gFSEiX6DhDl5Ih8EhzFHdvcxeS
+lqRhOR4KxO5I5EcUVVUVWJvtbF7X3ZzFHnNp82Y6LCK2D2OAfSQ/0kXHaJdWRTPD
+kEDwPvWEg1UbQ03YhmBSl1bWapOimI5lgapi7wJpnr1Abna74jCTDoOlt0Rp0opE
+rJyGza0DdvSqeFwivltGBcHeNWt7O6iJFi2MYxIKnklA03TpUymoxIDaBh2cu9Of
+G6unLU2Vlu1EGfH1SZcWpbUHz4fllRkZbdMFGTVQ6XLsKeyyAeYCcxWY/sH99kra
+Ufm+iZTTHimH5XuPs5WmsQNhHHxIyzCUWQnhkxXJMKQrg4A5uRVYIRhGiUgGqXhy
+KBhq4GELDhLZMhyIYeAwCdlD2Pt9TM5RECV7uZoFV1DNooQCtL6NY1GhKbVahwlw
+v1fq0D/zbV03NDb9J2Y5g95++U2Dye/wr9wGVVGlYsg8wM4gQ1yfjuJ9C5Zb8m11
+HDZ7JTTgxUCRtTp+lxoexUafWWW6E6s49PbPFt5opAy/KfBQ1CAU9cMRAx8vIgp4
+k+H8Ml7K2+BxeUHwypHDSqnkSnAsvCRx5H3ijVQTjGHFEB5EWzrgFQAL/bOD1upJ
+/j9VbksSLGcnqs1gA9WSBqTTiBaxYk1ZFAkqeqQlkojEFGVn7cNzamrraubNrZN/
+azXKPffd/q+cKDfc0g7svnp5186Le60a/do7535+43hn49Z98+rr98W2HCrwM61X
+JrounO0oGKeunZ54uvv5H14cnlwcnfytZ+rs6PoV1sT1Y9vap9jijsO7yJKfDvYv
+P7npzcnwS0fLpxZ+seDA281Nnyw4/Fr9g5e/nFp/yhv4urj/s+1jXcuWDb116fMH
+pi6dP/16Yu2r234cOZ3acTV7o3uRc+ShF8bav+obeHl3m5H5vfuj755tSF0cOrhn
+e+76jaV7jKWxE72Lrn+Y/GPu/rb0EdJ24dN9jz4yePL4X/17UtGbk+dWtB47FHuX
+D85ZM9oVP3P/lW//hJ1dr6zeuOCZX7uX3Po+O/Dxym+ublt8IrSj7ujCyS0X3id/
+Aw==
+=zcOK
+-----END PGP MESSAGE-----
