@@ -54,6 +54,12 @@ funs = let n ~> f = (n, f $ "(" ++ n ++ ")") in
   , "!"   ~> op (product . enumFromTo 1)
   , "pi"  ~> op (pi :: Double)
   , "sum" ~> opn sum
+  , "sin" ~> op sin
+  , "cos" ~> op cos
+  , "tan" ~> op tan
+  , "log" ~> op log
+  , "exp" ~> op exp
+  , "dup" ~> opDup
   ]
 
 class Op t where
@@ -77,6 +83,10 @@ instance (d ~ Double, Op t) => Op (d -> t) where
 
 opn :: ([Double] -> Double) -> String -> Operation
 opn f n (reverse -> xs) = Right [(f $ map fst xs, Node n $ map snd xs)]
+
+opDup :: String -> Operation
+opDup n []     = Left  $ Node n [Node "?" []]
+opDup n (x:xs) = Right $ x:x:xs
 
 usage :: [String]
 usage =

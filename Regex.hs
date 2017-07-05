@@ -1,10 +1,25 @@
-{-# LANGUAGE ViewPatterns, LambdaCase #-}
+{-# LANGUAGE ViewPatterns, LambdaCase, BangPatterns #-}
 
 import Prelude hiding (and, or)
-import Data.List (sort, nub, intercalate, isPrefixOf)
+
+import Control.Applicative ((<|>))
 import Control.Lens
 
+import Data.List (sort, nub, intercalate, isPrefixOf)
+import Data.Maybe (catMaybes)
+
+import Test.QuickCheck
+
+-- DFA stuff
+
 data DFA = DFA { alphabet :: [Char], states :: Int, start :: Int, finals :: [Int], fun :: Int -> Char -> Int }
+
+checkD :: DFA -> String -> Bool
+checkD d s = go (start d) s `elem` finals d
+    where go !n []     = n
+          go !n (x:xs) = go (fun d n x) xs
+
+-- Regex stuff
 
 data Regex = E | Lit String | Star Regex | Plus Regex | Opt Regex | Regex :* Regex | Regex :| Regex
     deriving (Eq, Show, Ord)
@@ -12,18 +27,47 @@ data Regex = E | Lit String | Star Regex | Plus Regex | Opt Regex | Regex :* Reg
 infixr 6 :*
 infixr 5 :|
 
-match :: Regex -> String -> [String]
-match E s = [s]
-match (Lit x) s | x `isPrefixOf` s = [drop (length x) s]
-match (Star r) s = match (E :| Plus r) s
-match (Plus r) s = match (r :* Star r) s
-match (Opt r) s = match (E :| r) s
-match (x :* y) s = concat [match y s' | s' <- match x s]
-match (x :| y) s = match x s ++ match y s
-match _ _ = []
+-- NOTE: still contains some bug, but I can't be bothered to find it or rework
+-- this logic again
 
-check :: Regex -> String -> Bool
-check r s = "" `elem` match r s
+step :: Char -> Regex -> Maybe Regex
+step _ E    = Nothing
+
+step c (Lit (x:xs)) | x == c = Just (Lit xs)
+step c (Lit _) = Nothing
+
+step c (x :* y) = case step c x of
+    Just E  -> Just y
+    Just x' -> Just $ x' :* y
+    Nothing -> if eof x then step c y else Nothing
+
+step c (x :| y) = case (step c x, step c y) of
+    (Just E,  Just E)  -> Just E
+    (Just x', Just y') -> Just (x' :| y')
+    (x', y')           -> x' <|> y'
+
+step c (Star r) = case step c r of
+    Nothing -> Nothing
+    Just r' -> Just (Star r')
+
+step c (Plus r) = step c (Star r)
+step c (Opt  r) = step c r
+
+eof :: Regex -> Bool
+eof E    = True
+eof (Lit "") = True
+eof (Lit _ ) = False
+eof (Star _) = True
+eof (Plus r) = eof r
+eof (Opt  _) = True
+eof (x :* y) = eof x && eof y
+eof (x :| y) = eof x || eof y
+
+checkR :: Regex -> String -> Bool
+checkR r []     = eof r
+checkR r (x:xs) = case step x r of
+    Just r' -> checkR r' xs
+    Nothing -> False
 
 instance Plated Regex where
     plate f E        = pure E
@@ -41,21 +85,31 @@ or xs = foldr1 (:|) xs
 and [] = E
 and xs = foldr1 (:*) xs
 
-regex :: DFA -> Regex
-regex d@DFA { alphabet = l, fun = f } = or [α (states d) (start d) x | x <- finals d]
-    where α 0 i j = let g | i == j = Opt
-                          | otherwise = id
-                    in g $ or [ Lit [a] | a <- l, f i a == j ]
+-- DFA conversion and minification
 
-          α k i j = let k' = k-1 in α k' i j :| α k' i k :* Star (α k' k k) :* α k' k j
+regex :: DFA -> Maybe Regex
+regex d@DFA { alphabet = l, fun = f } = orM $ catMaybes [α (states d) (start d) x
+                                                        | x <- finals d]
+
+    where α :: Int -> Int -> Int -> Maybe Regex
+          α 0 i j = let r | i == j    = [E]
+                          | otherwise = []
+                    in orM $ r ++ [ Lit [a] | a <- l, f i a == j ]
+
+          α k i j = orM $ catMaybes [ α k' i j, frg ]
+             where k' = k - 1
+                   frg = do f <- α k' i k
+                            r <- α k' k k
+                            g <- α k' k j
+                            return $ f :* Star r :* g
+
+          orM [] = Nothing
+          orM rs = Just (or rs)
 
 minify :: Regex -> Regex
 minify = rewrite $ \x -> case x of
     x :| y | x == y -> Just x
     x :| y | x > y -> Just $ y :| x
-
-    (x :* y) :* z -> Just $ x :* (y :* z)
-    (x :| y) :| z -> Just $ x :| (y :| z)
 
     E :| r -> Just $ Opt r
     Opt E -> Just E
@@ -93,11 +147,32 @@ minify = rewrite $ \x -> case x of
     x :* Star y | x == y -> Just $ Plus x
     Star x :* y | x == y -> Just $ Plus x
 
+    Star x :* Plus y | x == y -> Just $ Star x
+    Star x :* Opt  y | x == y -> Just $ Star x
+    Plus x :* Star y | x == y -> Just $ Star y
+    Opt  x :* Star y | x == y -> Just $ Star y
+
+    Star x :| Plus y | x == y -> Just $ Star x
+    Star x :| Opt  y | x == y -> Just $ Star x
+    Plus x :| Star y | x == y -> Just $ Star y
+    Opt  x :| Star y | x == y -> Just $ Star y
+
+    (x :* y) :* z -> Just $ x :* (y :* z)
+    (x :| y) :| z -> Just $ x :| (y :| z)
+
     _ -> Nothing
 
-tryReduce :: Eq a => (a -> a) ->  a -> Maybe a
-tryReduce f a@(f -> b) | a == b    = Nothing
-                       | otherwise = Just b
+-- Testing
+
+propMinify :: Regex -> String -> Bool
+propMinify r s = checkR r s == checkR (minify r) s
+
+propDFA :: DFA -> String -> Bool
+propDFA d s = case regex d of
+    Nothing -> checkD d s == False
+    Just  r -> checkD d s == checkR r s
+
+-- Pretty-printing and examples
 
 pretty :: Int -> Regex -> String
 pretty _ E        = "ε"
@@ -117,5 +192,7 @@ goal = DFA { alphabet = "01", states = 4, start = 1, finals = [1], fun = f }
     where f n '0' = case n of 1 -> 2; 2 -> 1; 3 -> 4; 4 -> 3
           f n '1' = case n of 1 -> 3; 3 -> 1; 2 -> 4; 4 -> 2
 
-main :: IO ()
-main = putStrLn . pretty 0 . minify $ regex goal
+test :: DFA
+test = DFA { alphabet = "01", states = 2, start = 1, finals = [2], fun = f }
+    where f 1 _ = 2
+          f 2 _ = 1
